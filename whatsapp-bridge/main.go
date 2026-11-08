@@ -906,7 +906,12 @@ func main() {
 			if evt.Event == "code" {
 				fmt.Println("\nScan this QR code with your WhatsApp app:")
 				qrterminal.GenerateHalfBlock(evt.Code, qrterminal.L, os.Stdout)
+				// Lets a headless bridge be paired from another screen.
+				if err := os.WriteFile("store/qr.txt", []byte(evt.Code), 0600); err != nil {
+					logger.Warnf("Failed to write store/qr.txt: %v", err)
+				}
 			} else if evt.Event == "success" {
+				os.Remove("store/qr.txt")
 				connected <- true
 				break
 			}
