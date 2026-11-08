@@ -219,6 +219,9 @@ func recipientAllowed(client *whatsmeow.Client, jid types.JID) bool {
 			if own := client.Store.ID; own != nil && jid.User == own.User && jid.Server == own.Server {
 				return true
 			}
+			if own := client.Store.LID; !own.IsEmpty() && jid.User == own.User && jid.Server == own.Server {
+				return true
+			}
 		default:
 			if allowed == jid.String() || (jid.Server == types.DefaultUserServer && allowed == jid.User) {
 				return true
