@@ -159,6 +159,10 @@ You can send various media types to your WhatsApp contacts:
 
 By default, just the metadata of the media is stored in the local database. The message will indicate that media was sent. To access this media you need to use the download_media tool which takes the `message_id` and `chat_jid` (which are shown when printing messages containing the meda), this downloads the media and then returns the file path which can be then opened or passed to another tool.
 
+### Bridge address
+
+The bridge's REST API has no authentication, so it listens on `127.0.0.1:8080`. Set `WHATSAPP_BRIDGE_ADDR` on the bridge and `WHATSAPP_API_BASE_URL` (for example `http://127.0.0.1:8741/api`) on the MCP server to use another address.
+
 ## Technical Details
 
 1. Claude sends requests to the Python MCP server

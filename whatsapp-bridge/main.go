@@ -49,7 +49,7 @@ type MessageStore struct {
 // Initialize message store
 func NewMessageStore() (*MessageStore, error) {
 	// Create directory for database if it doesn't exist
-	if err := os.MkdirAll("store", 0755); err != nil {
+	if err := os.MkdirAll("store", 0700); err != nil {
 		return nil, fmt.Errorf("failed to create store directory: %v", err)
 	}
 
@@ -288,8 +288,6 @@ func sendWhatsAppMessage(client *whatsmeow.Client, recipient string, message str
 			return false, fmt.Sprintf("Error uploading media: %v", err)
 		}
 
-		fmt.Println("Media uploaded", resp)
-
 		// Create the appropriate message type based on media type
 		switch mediaType {
 		case whatsmeow.MediaImage:
@@ -463,9 +461,9 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 
 		// Log based on message type
 		if mediaType != "" {
-			fmt.Printf("[%s] %s %s: [%s: %s] %s\n", timestamp, direction, sender, mediaType, filename, content)
+			fmt.Printf("[%s] %s %s: [%s]\n", timestamp, direction, sender, mediaType)
 		} else if content != "" {
-			fmt.Printf("[%s] %s %s: %s\n", timestamp, direction, sender, content)
+			fmt.Printf("[%s] %s %s: text\n", timestamp, direction, sender)
 		}
 	}
 }
@@ -562,7 +560,7 @@ func downloadMedia(client *whatsmeow.Client, messageStore *MessageStore, message
 	var err error
 
 	// First, check if we already have this file
-	chatDir := fmt.Sprintf("store/%s", strings.ReplaceAll(chatJID, ":", "_"))
+	chatDir := filepath.Join("store", safeName(strings.ReplaceAll(chatJID, ":", "_")))
 	localPath := ""
 
 	// Get media info from the database
@@ -591,7 +589,7 @@ func downloadMedia(client *whatsmeow.Client, messageStore *MessageStore, message
 	}
 
 	// Generate a local path for the file
-	localPath = fmt.Sprintf("%s/%s", chatDir, filename)
+	localPath = filepath.Join(chatDir, safeName(filename))
 
 	// Get absolute path
 	absPath, err := filepath.Abs(localPath)
@@ -655,6 +653,16 @@ func downloadMedia(client *whatsmeow.Client, messageStore *MessageStore, message
 	return true, mediaType, filename, absPath, nil
 }
 
+// safeName reduces a name chosen by another WhatsApp user, such as a document's
+// file name, to a single path element so downloads stay inside store/.
+func safeName(name string) string {
+	name = filepath.Base(name)
+	if name == "." || name == ".." || name == string(filepath.Separator) {
+		return "file"
+	}
+	return name
+}
+
 // Extract direct path from a WhatsApp media URL
 func extractDirectPathFromURL(url string) string {
 	// The direct path is typically in the URL, we need to extract it
@@ -671,7 +679,7 @@ func extractDirectPathFromURL(url string) string {
 }
 
 // Start a REST API server to expose the WhatsApp client functionality
-func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port int) {
+func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, serverAddr string) {
 	// Handler for sending messages
 	http.HandleFunc("/api/send", func(w http.ResponseWriter, r *http.Request) {
 		// Only allow POST requests
@@ -698,7 +706,7 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port 
 			return
 		}
 
-		fmt.Println("Received request to send message", req.Message, req.MediaPath)
+		fmt.Println("Received request to send message to", req.Recipient)
 
 		// Send the message
 		success, message := sendWhatsAppMessage(client, req.Recipient, req.Message, req.MediaPath)
@@ -770,7 +778,6 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port 
 	})
 
 	// Start the server
-	serverAddr := fmt.Sprintf(":%d", port)
 	fmt.Printf("Starting REST API server on %s...\n", serverAddr)
 
 	// Run server in a goroutine so it doesn't block
@@ -790,7 +797,7 @@ func main() {
 	dbLog := waLog.Stdout("Database", "INFO", true)
 
 	// Create directory for database if it doesn't exist
-	if err := os.MkdirAll("store", 0755); err != nil {
+	if err := os.MkdirAll("store", 0700); err != nil {
 		logger.Errorf("Failed to create store directory: %v", err)
 		return
 	}
@@ -901,7 +908,12 @@ func main() {
 	fmt.Println("\n✓ Connected to WhatsApp! Type 'help' for commands.")
 
 	// Start REST API server
-	startRESTServer(client, messageStore, 8080)
+	// The API has no authentication, so only listen on loopback unless told otherwise.
+	bridgeAddr := os.Getenv("WHATSAPP_BRIDGE_ADDR")
+	if bridgeAddr == "" {
+		bridgeAddr = "127.0.0.1:8080"
+	}
+	startRESTServer(client, messageStore, bridgeAddr)
 
 	// Create a channel to keep the main goroutine alive
 	exitChan := make(chan os.Signal, 1)
@@ -1067,9 +1079,6 @@ func handleHistorySync(client *whatsmeow.Client, messageStore *MessageStore, his
 					mediaType, filename, url, mediaKey, fileSHA256, fileEncSHA256, fileLength = extractMediaInfo(msg.Message.Message)
 				}
 
-				// Log the message content for debugging
-				logger.Infof("Message content: %v, Media Type: %v", content, mediaType)
-
 				// Skip messages with no content and no media
 				if content == "" && mediaType == "" {
 					continue
@@ -1126,14 +1135,6 @@ func handleHistorySync(client *whatsmeow.Client, messageStore *MessageStore, his
 					logger.Warnf("Failed to store history message: %v", err)
 				} else {
 					syncedCount++
-					// Log successful message storage
-					if mediaType != "" {
-						logger.Infof("Stored message: [%s] %s -> %s: [%s: %s] %s",
-							timestamp.Format("2006-01-02 15:04:05"), sender, chatJID, mediaType, filename, content)
-					} else {
-						logger.Infof("Stored message: [%s] %s -> %s: %s",
-							timestamp.Format("2006-01-02 15:04:05"), sender, chatJID, content)
-					}
 				}
 			}
 		}
